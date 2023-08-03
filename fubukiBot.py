@@ -103,51 +103,54 @@ async def search_for_manga(ctx, *args):
     """ for line in manga_list:
         print("\n".join(line)) """
     pages = len(manga_list)
-    curr_page = 1
-    msg_string = "\n".join(manga_list[curr_page-1])
-    message = await ctx.send(f"Page {curr_page}/{pages}:\n{msg_string}")
-    await message.add_reaction("◀️")
-    await message.add_reaction("▶️")
-    await message.add_reaction("✅")
-    await ctx.send('When you decide which manga to add, react with ✅ and enter the corresponding manga number')
-    def check(reaction, user):
-        return user == ctx.author and str(reaction.emoji) in ["◀️", "▶️", "✅"]
-    def check_msg(msg):
-        return msg.author == ctx.author and msg.channel == ctx.channel and msg.content.isnumeric()
-    while True:
-        try:
-            reaction, user = await bot.wait_for("reaction_add", timeout=60, check=check)
-            # waiting for a reaction to be added - times out after 60 seconds
+    if pages > 0:
+        curr_page = 1
+        msg_string = "\n".join(manga_list[curr_page-1])
+        message = await ctx.send(f"Page {curr_page}/{pages}:\n{msg_string}")
+        await message.add_reaction("◀️")
+        await message.add_reaction("▶️")
+        await message.add_reaction("✅")
+        await ctx.send('When you decide which manga to add, react with ✅ and enter the corresponding manga number')
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) in ["◀️", "▶️", "✅"]
+        def check_msg(msg):
+            return msg.author == ctx.author and msg.channel == ctx.channel and msg.content.isnumeric()
+        while True:
+            try:
+                reaction, user = await bot.wait_for("reaction_add", timeout=60, check=check)
+                # waiting for a reaction to be added - times out after 60 seconds
 
-            if str(reaction.emoji) == "▶️" and curr_page != pages:
-                curr_page += 1
-                msg_string = "\n".join(manga_list[curr_page-1])
-                await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
-                await message.remove_reaction(reaction, user)
+                if str(reaction.emoji) == "▶️" and curr_page != pages:
+                    curr_page += 1
+                    msg_string = "\n".join(manga_list[curr_page-1])
+                    await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
+                    await message.remove_reaction(reaction, user)
 
-            elif str(reaction.emoji) == "◀️" and curr_page > 1:
-                curr_page -= 1
-                msg_string = "\n".join(manga_list[curr_page-1])
-                await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
-                await message.remove_reaction(reaction, user)
+                elif str(reaction.emoji) == "◀️" and curr_page > 1:
+                    curr_page -= 1
+                    msg_string = "\n".join(manga_list[curr_page-1])
+                    await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
+                    await message.remove_reaction(reaction, user)
 
-            elif str(reaction.emoji) == "✅":
-                print("check emoji")
-                msg = await bot.wait_for("message", timeout=60, check=check_msg)
-                mangaNum = int(msg.content)
-                print(msg.content)
-                print('got msg')
-                print(f'manga you picked is #{mangaNum}: {search_results[mangaNum][0]}')
-                await ctx.send(f'You chose manga #{msg.content}: {search_results[mangaNum][0]}')
-            
-            else:
-                await message.remove_reaction(reaction, user)
-                # removes reactions if the user tries to go forward on the last page or
-                # backwards on the first page
-        except asyncio.TimeoutError:
-            await message.delete()
-            break
-            # ending the loop if user doesn't react after 60 seconds
+                elif str(reaction.emoji) == "✅":
+                    print("check emoji")
+                    msg = await bot.wait_for("message", timeout=60, check=check_msg)
+                    mangaNum = int(msg.content)
+                    print(msg.content)
+                    print('got msg')
+                    print(f'manga you picked is #{mangaNum}: {search_results[mangaNum][0]}')
+                    await ctx.send(f'You chose manga #{msg.content}: {search_results[mangaNum][0]}')
+                
+                else:
+                    await message.remove_reaction(reaction, user)
+                    # removes reactions if the user tries to go forward on the last page or
+                    # backwards on the first page
+            except asyncio.TimeoutError:
+                await message.delete()
+                break
+                # ending the loop if user doesn't react after 60 seconds
+    else:
+        await ctx.send(f'No search results found for {" ".join(args)}')
 
 @bot.command(name='manga_remove', help='choose a manga to remove from your update list')
 async def remove_manga(ctx):
