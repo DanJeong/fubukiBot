@@ -11,9 +11,10 @@ from utils import mangaSearch
 connection = sqlite3.connect("manga_list.db")
 c = connection.cursor()
 c.execute("""CREATE TABLE IF NOT EXISTS manga_list (
-            manga_name string NOT NULL PRIMARY KEY,
             user_id string NOT NULL,
-            manga_link string NOT NULL
+            manga_name string NOT NULL,
+            manga_link string NOT NULL,
+            PRIMARY KEY(user_id, manga_name)
             )""")
 sqlite_insert_with_param = """INSERT INTO manga_list
                             (user_id, manga_name, manga_link)
@@ -81,8 +82,6 @@ async def search_for_manga(ctx, *args):
     if list_line:
         manga_list.append(list_line)#appends any remaining lines left
     print(f'length of manga list: {len(manga_list)}')
-    """ for line in manga_list:
-        print("\n".join(line)) """
     pages = len(manga_list)
     if pages > 0:
         curr_page = 1
@@ -114,23 +113,22 @@ async def search_for_manga(ctx, *args):
                     await message.remove_reaction(reaction, user)
 
                 elif str(reaction.emoji) == "✅":
-                    print("check emoji")
                     msg = await bot.wait_for("message", timeout=60, check=check_msg)
                     mangaNum = int(msg.content)
-                    print(msg.content)
-                    print('got msg')
-                    print(f'manga you picked is #{mangaNum}: {search_results[mangaNum][0]}')
-                    await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
-
-                    #sqlite stuff here, adding manga into database
-                    user_id = ctx.author.id
-                    manga_name = search_results[mangaNum][0]
-                    manga_link = search_results[mangaNum][1]
-                    insert_values = (user_id, manga_name, manga_link)
-                    c.execute(sqlite_insert_with_param, insert_values)
-                    connection.commit()
-                    break
-
+                    if mangaNum in search_results:
+                        await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
+                        #sqlite stuff here, adding manga into database
+                        user_id = ctx.author.id
+                        manga_name = search_results[mangaNum][0]
+                        manga_link = search_results[mangaNum][1]
+                        insert_values = (user_id, manga_name, manga_link)
+                        c.execute(sqlite_insert_with_param, insert_values)
+                        connection.commit()
+                        break
+                    else:
+                        await ctx.send(f'{mangaNum} is not on the list, please enter a valid number')
+                        await message.remove_reaction(reaction, user)
+                        continue
                 else:
                     await message.remove_reaction(reaction, user)
                     # removes reactions if the user tries to go forward on the last page or
