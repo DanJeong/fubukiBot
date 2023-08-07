@@ -1,4 +1,5 @@
 import os
+import re
 import random
 import asyncio
 import sqlite3
@@ -26,6 +27,22 @@ GUILD = os.getenv('DISCORD_GUILD')
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+#Non-Bot Functions
+def get_user_manga(user_id):
+    c.execute("SELECT manga_name FROM manga_list WHERE user_id=? ORDER BY manga_name ASC", (user_id,))
+    search_results = c.fetchall()
+    #formats list into pages of 10
+    manga_list = []
+    list_line = []
+    for num, manga in enumerate(search_results, 1):
+        list_line.append(f'{num}. {manga[0]}')
+        if num % 10 == 0:
+            manga_list.append(list_line)
+            list_line = []
+    if list_line:
+        manga_list.append(list_line)#appends any remaining lines left
+    return manga_list
 
 #help command is not needed, already built into python bots, just need to edit that
 @bot.event
@@ -66,11 +83,16 @@ async def create_channel(ctx, channel_name='default_channel_name'):
 @bot.command(name='manga_add', help='search for a manga to add to your update list')
 async def search_for_manga(ctx, *args):
     currUser = ctx.author.name
-    currUserID = ctx.author.id
     print(f'person who used this command is: {currUser}')
     print(f'ok, currently searching for: {" ".join(args)}')
-    await ctx.send(f'{ctx.message.author.mention} i will search for {" ".join(args)} momentarily, please sit tight :D')
-    search_results = mangaSearch.m_search(" ".join(args))
+    search_results = {}
+    searched = False
+    if len(args) < 1:
+        await ctx.send(f'Please give a manga to search for after the command')
+    else:
+        await ctx.send(f'{ctx.message.author.mention} i will search for {" ".join(args)} momentarily, please sit tight :D')
+        search_results = mangaSearch.m_search(" ".join(args))
+        searched = True
     
     manga_list = []
     list_line = []
@@ -116,15 +138,23 @@ async def search_for_manga(ctx, *args):
                     msg = await bot.wait_for("message", timeout=60, check=check_msg)
                     mangaNum = int(msg.content)
                     if mangaNum in search_results:
-                        await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
                         #sqlite stuff here, adding manga into database
                         user_id = ctx.author.id
                         manga_name = search_results[mangaNum][0]
                         manga_link = search_results[mangaNum][1]
-                        insert_values = (user_id, manga_name, manga_link)
-                        c.execute(sqlite_insert_with_param, insert_values)
-                        connection.commit()
-                        break
+                        #see if row already exists in table
+                        c.execute("SELECT count(*) FROM manga_list WHERE (user_id=? AND manga_name=?)", (user_id, manga_name,))
+                        rowsBefore = c.fetchone()[0]
+                        if rowsBefore == 0:
+                            insert_values = (user_id, manga_name, manga_link)
+                            c.execute(sqlite_insert_with_param, insert_values)
+                            connection.commit()
+                            await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
+                            break
+                        else:
+                            await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was already in your list')
+                            await message.remove_reaction(reaction, user)
+                            continue
                     else:
                         await ctx.send(f'{mangaNum} is not on the list, please enter a valid number')
                         await message.remove_reaction(reaction, user)
@@ -136,30 +166,75 @@ async def search_for_manga(ctx, *args):
             except asyncio.TimeoutError:
                 break
                 # ending the loop if user doesn't react after 60 seconds
-    else:
+    elif searched == True:
         await ctx.send(f'No search results found for {" ".join(args)}')
 
 @bot.command(name='manga_remove', help='choose a manga to remove from your update list')
 async def remove_manga(ctx):
-    #show user their manga list and assign each one a number
-    #user gives number, and that manga is removed from their list (maybe have Y/N confirmation)
-    print()
+    user_id = ctx.author.id
+    manga_list = get_user_manga(user_id)
+    pages = len(manga_list)
+    if pages > 0:
+        curr_page = 1
+        msg_string = "\n".join(manga_list[curr_page-1])
+        message = await ctx.send(f"Page {curr_page}/{pages}:\n{msg_string}")
+        await message.add_reaction("◀️")
+        await message.add_reaction("▶️")
+        await message.add_reaction("✅")
+        await ctx.send('When you decide which manga to remove, react with ✅ and enter the corresponding manga number')
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) in ["◀️", "▶️", "✅"]
+        def check_msg(msg):
+            return msg.author == ctx.author and msg.channel == ctx.channel and msg.content.isnumeric()
+        while True:
+            try:
+                reaction, user = await bot.wait_for("reaction_add", timeout=60, check=check)
+                # waiting for a reaction to be added - times out after 60 seconds
+
+                if str(reaction.emoji) == "▶️" and curr_page != pages:
+                    curr_page += 1
+                    msg_string = "\n".join(manga_list[curr_page-1])
+                    await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
+                    await message.remove_reaction(reaction, user)
+
+                elif str(reaction.emoji) == "◀️" and curr_page > 1:
+                    curr_page -= 1
+                    msg_string = "\n".join(manga_list[curr_page-1])
+                    await message.edit(content=f"Page {curr_page}/{pages}:\n{msg_string}")
+                    await message.remove_reaction(reaction, user)
+
+                elif str(reaction.emoji) == "✅":
+                    msg = await bot.wait_for("message", timeout=60, check=check_msg)
+                    mangaNum = int(msg.content)
+                    print(f'mangaNum is {mangaNum}')
+                    lastNum = (len(manga_list) - 1)*10 + len(manga_list[-1]) - 1
+                    if mangaNum > 0 and mangaNum <= lastNum:
+                        dirty_manga_name = manga_list[(mangaNum - 1) // 10][(mangaNum - 1) % 10]
+                        manga_name = dirty_manga_name.lstrip('0123456789. ')
+                        print(f'manga_name found: {manga_name}')
+                        c.execute("DELETE FROM manga_list WHERE (user_id=? AND manga_name=?)", (user_id, manga_name,))
+                        connection.commit()
+                        await ctx.send(f'{manga_name} was successfully removed from your list')
+                        break
+                    else:
+                        print('invalid manga')
+                        await ctx.send(f'{mangaNum} is not on the list, please enter a valid number')
+                        await message.remove_reaction(reaction, user)
+                        continue
+                else:
+                    await message.remove_reaction(reaction, user)
+                    # removes reactions if the user tries to go forward on the last page or
+                    # backwards on the first page
+            except asyncio.TimeoutError:
+                break
+                # ending the loop if user doesn't react after 60 seconds
+    else:
+        await ctx.send(f'Your manga list is currently empty, use *!manga_add* to add to your list')
 
 @bot.command(name='manga_view', help='view your manga update list')
 async def view_manga(ctx):
     user_id = ctx.author.id
-    c.execute("SELECT manga_name FROM manga_list WHERE user_id=? ORDER BY manga_name ASC", (user_id,))
-    search_results = c.fetchall()
-    #formats list into pages of 10
-    manga_list = []
-    list_line = []
-    for num, manga in enumerate(search_results, 1):
-        list_line.append(f'{num}. {manga[0]}')
-        if num % 10 == 0:
-            manga_list.append(list_line)
-            list_line = []
-    if list_line:
-        manga_list.append(list_line)#appends any remaining lines left
+    manga_list = get_user_manga(user_id)
     pages = len(manga_list)
     if pages > 0:
         curr_page = 1
