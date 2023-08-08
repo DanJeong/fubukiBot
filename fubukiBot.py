@@ -5,8 +5,10 @@ import asyncio
 import sqlite3
 import discord
 from discord.ext import commands
+from discord.ext import tasks
 from dotenv import load_dotenv
-
+import time
+from utils import mangaUpdates
 from utils import mangaSearch
 
 connection = sqlite3.connect("manga_list.db")
@@ -17,8 +19,16 @@ c.execute("""CREATE TABLE IF NOT EXISTS manga_list (
             manga_link string NOT NULL,
             PRIMARY KEY(user_id, manga_name)
             )""")
-sqlite_insert_with_param = """INSERT INTO manga_list
+c.execute("""CREATE TABLE IF NOT EXISTS latest_chapters (
+            manga_name string NOT NULL PRIMARY KEY,
+            manga_link string NOT NULL,
+            latest_chapter string NOT NULL
+            )""")
+manga_list_insert = """INSERT INTO manga_list
                             (user_id, manga_name, manga_link)
+                            VALUES (?, ?, ?);"""
+latest_chapters_insert = """INSERT INTO latest_chapters
+                            (manga_name, manga_link, latest_chapter)
                             VALUES (?, ?, ?);"""
 
 load_dotenv()
@@ -48,6 +58,7 @@ def get_user_manga(user_id):
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
+    #check_for_updates.start()
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -147,8 +158,16 @@ async def search_for_manga(ctx, *args):
                         rowsBefore = c.fetchone()[0]
                         if rowsBefore == 0:
                             insert_values = (user_id, manga_name, manga_link)
-                            c.execute(sqlite_insert_with_param, insert_values)
+                            c.execute(manga_list_insert, insert_values)
                             connection.commit()
+                            #updating latest_chapters table
+                            c.execute("SELECT count(*) FROM latest_chapters WHERE manga_name=?", (manga_name,))
+                            rowsBefore = c.fetchone()[0]
+                            if rowsBefore == 0:#if not already in latest_chapters
+                                latest_link = mangaUpdates.get_latest_chapter(manga_link)
+                                insert_values = (manga_name, manga_link, latest_link)
+                                c.execute(latest_chapters_insert, insert_values)
+                                connection.commit()
                             await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
                             break
                         else:
@@ -207,13 +226,21 @@ async def remove_manga(ctx):
                     msg = await bot.wait_for("message", timeout=60, check=check_msg)
                     mangaNum = int(msg.content)
                     print(f'mangaNum is {mangaNum}')
-                    lastNum = (len(manga_list) - 1)*10 + len(manga_list[-1]) - 1
+                    lastNum = (len(manga_list) - 1)*10 + len(manga_list[-1])
+                    print(f'lastNum is: {lastNum}')
                     if mangaNum > 0 and mangaNum <= lastNum:
                         dirty_manga_name = manga_list[(mangaNum - 1) // 10][(mangaNum - 1) % 10]
                         manga_name = dirty_manga_name.lstrip('0123456789. ')
                         print(f'manga_name found: {manga_name}')
                         c.execute("DELETE FROM manga_list WHERE (user_id=? AND manga_name=?)", (user_id, manga_name,))
                         connection.commit()
+                        #remove manga from latest_chapters if not in manga_list anymore
+                        c.execute("SELECT count(*) FROM manga_list WHERE manga_name=?", (manga_name,))
+                        rowsBefore = c.fetchone()[0]
+                        print(f'rowsBefore is: {rowsBefore}')
+                        if rowsBefore == 0:
+                            c.execute("DELETE FROM latest_chapters WHERE manga_name=?", (manga_name,))
+                            connection.commit()
                         await ctx.send(f'{manga_name} was successfully removed from your list')
                         break
                     else:
@@ -270,5 +297,21 @@ async def view_manga(ctx):
                 # ending the loop if user doesn't react after 60 seconds
     else:
         await ctx.send(f'Your manga update list is currently empty, try !manga_add *manga_name* to add a manga to your list!')
+
+@tasks.loop(seconds=10)
+async def check_for_updates():
+    channel = bot.get_channel(1134171037228081275)
+    await bot.wait_until_ready()
+    t = time.localtime()
+    await channel.send(f'The current time is: {time.strftime("%H:%M:%S", t)}')
+    #get all rows from manga_list table
+    #create a dict {manga_link : [users]}
     
+    #get all rows from latest_chapters
+    #for manga_name, manga_link, latest_chapter in rows:
+        #get updated latest_chapter from each manga_link
+    #if != to current latest_chapter, replace in db table and add manga_link to a new list called "updatedManga"
+    #for manga in updatedManga, get from 1st dict: users for that manga, and dm them all that there is a new chapter available, with the link
+        #get the link to send them by doing SELECT latest_chapter FROM latest_chapters WHERE manga_link=manga_link
+
 bot.run(TOKEN)

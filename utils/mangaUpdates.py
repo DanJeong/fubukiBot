@@ -2,12 +2,9 @@
 from bs4 import BeautifulSoup as bs
 from selenium import webdriver
 import time
+from selenium.webdriver.common.by import By
 
-
-def main():
-    URL = 'https://mangasee123.com/manga/Weak-Hero'  #url of manga to check
-    
-
+def get_latest_chapter(URL):
     options = webdriver.ChromeOptions()
     options.add_argument('--headless=new')
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
@@ -16,26 +13,11 @@ def main():
     print('running...')
 
     dr.get(URL) #gets html data from url
-    soup = bs(dr.page_source, 'html5lib') #parses raw html data in r
-    last_update = soup.find('div', attrs = {'class':'list-group top-10 bottom-5 ng-scope'})
-
-    while True:
-        time.sleep(600)
-        dr.get(URL)
-        soup = bs(dr.page_source, 'html5lib')
-        curr_update = soup.find('div', attrs = {'class':'list-group top-10 bottom-5 ng-scope'})
-
-        t = time.localtime()
-        current_time = time.strftime("%H:%M:%S", t)
-
-        if last_update == curr_update:
-            print('no new update. Current time: ' + current_time)
-            last_update = curr_update
-            continue
-        else:
-            print('new chapter available! Current time: ' + current_time)
-            break
-        
+    #soup = bs(dr.page_source, 'html5lib') #parses raw html data in r
+    #last_update = soup.find('div', attrs = {'class':'list-group top-10 bottom-5 ng-scope'})
+    last_update = dr.find_element(By.XPATH, "//a[@class='list-group-item ChapterLink ng-scope'][1]")
+    lastChapter = last_update.get_attribute('href')
+    #print(f'lastChapter is: {lastChapter}')
     dr.quit()
-
-if __name__ == '__main__': main()
+    return lastChapter
+    
