@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from discord.ext import tasks
 from dotenv import load_dotenv
+from collections import defaultdict
 import time
 from utils import mangaUpdates
 from utils import mangaSearch
@@ -58,7 +59,7 @@ def get_user_manga(user_id):
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
-    #check_for_updates.start()
+    check_for_updates.start()
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -298,7 +299,7 @@ async def view_manga(ctx):
     else:
         await ctx.send(f'Your manga update list is currently empty, try !manga_add *manga_name* to add a manga to your list!')
 
-@tasks.loop(seconds=10)
+@tasks.loop(hours=1)
 async def check_for_updates():
     channel = bot.get_channel(1134171037228081275)
     await bot.wait_until_ready()
@@ -306,12 +307,42 @@ async def check_for_updates():
     await channel.send(f'The current time is: {time.strftime("%H:%M:%S", t)}')
     #get all rows from manga_list table
     #create a dict {manga_link : [users]}
-    
+    usersToMessage = defaultdict(list)
+    c.execute("SELECT manga_link, user_id FROM manga_list")
+    user_list = c.fetchall()
+    for manga_link, user_id in user_list:
+        usersToMessage[manga_link].append(user_id)
+    for link, users in usersToMessage.items():
+        print(f'link: {link}, users: {users}')
     #get all rows from latest_chapters
+    #create 2nd dict {manga_link : [manga_name, latest_chapter]}
     #for manga_name, manga_link, latest_chapter in rows:
         #get updated latest_chapter from each manga_link
-    #if != to current latest_chapter, replace in db table and add manga_link to a new list called "updatedManga"
-    #for manga in updatedManga, get from 1st dict: users for that manga, and dm them all that there is a new chapter available, with the link
-        #get the link to send them by doing SELECT latest_chapter FROM latest_chapters WHERE manga_link=manga_link
+        #if != to current latest_chapter, replace in latest_chapters table and add manga_link to a new list called "updatedManga"
+    mangaChecker = defaultdict(list)
+    c.execute("SELECT * FROM latest_chapters")
+    lc_rows = c.fetchall()
+    for manga_name, manga_link, latest_chapter in lc_rows:
+        mangaChecker[manga_link] = [manga_name, latest_chapter]
+    updatedManga = []
+    for manga_link, pair in mangaChecker.items():
+        oldChapter = pair[1]
+        newChapter = mangaUpdates.get_latest_chapter(manga_link)
+        if oldChapter != newChapter:
+            mangaChecker[manga_link][1] = newChapter
+            updatedManga.append(manga_link)
+            c.execute("UPDATE latest_chapters SET latest_chapter=? WHERE manga_name=?", (newChapter, pair[0],))
+            connection.commit()
+    #for manga in updatedManga, get from 1st dict: users for that manga, and dm them all that there is a new chapter available, with the name and link
+        #we can get name and link by accessing the 2nd dict, where key = manga_link and values = name and latest link
+    print('New chapters found for:')
+    for manga in updatedManga:
+        print(f'Users to update for {manga}: {usersToMessage[manga]}')
+        manga_name = mangaChecker[manga][0]
+        new_link = mangaChecker[manga][1]
+        for user_id in usersToMessage[manga]:
+            user = bot.get_user(int(user_id))
+            await user.create_dm()
+            await user.dm_channel.send(f'There is a new chapter available for {manga_name}! Read here: {new_link}')
 
 bot.run(TOKEN)
