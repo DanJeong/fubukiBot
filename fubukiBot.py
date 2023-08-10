@@ -8,7 +8,6 @@ from discord.ext import commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 from collections import defaultdict
-import time
 from utils import mangaUpdates
 from utils import mangaSearch
 
@@ -35,9 +34,11 @@ latest_chapters_insert = """INSERT INTO latest_chapters
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD = os.getenv('DISCORD_GUILD')
-
+help_command = commands.DefaultHelpCommand(
+    no_category = 'Commands'
+)
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', help_command=help_command, intents=intents)
 
 #Non-Bot Functions
 def get_user_manga(user_id):
@@ -68,15 +69,15 @@ async def on_command_error(ctx, error):
 
 @bot.command(name='quote', help='Gives an insiprational quote from a random VTuber')
 async def send_vQuote(ctx):
-    vQuotes = ['\"watah in the fire why?\" - Korone',
+    v_quotes = ['\"watah in the fire why?\" - Korone',
                '\'no wife, only friend\' = Fubuki',
                '\"AH↓HA↑HA↑HA↑HA↑\" - Pekora']
     print("quote command")
-    quote = random.choice(vQuotes)
+    quote = random.choice(v_quotes)
     await ctx.send(quote)
 
 @bot.command(name='d6', help='simulates rolling a 6-sided die')
-async def roll(ctx, number_of_dice: int = 1):
+async def roll(ctx, number_of_dice: int = commands.parameter(default = 1, description='number of times to roll the die')):
     dice = [
         str(random.choice(range(1, 7)))
         for _ in range(number_of_dice)
@@ -85,7 +86,7 @@ async def roll(ctx, number_of_dice: int = 1):
 
 @bot.command(name='create_channel', help='creates a channel with the given name (ADMIN ONLY)')
 @commands.has_role('admin')
-async def create_channel(ctx, channel_name='default_channel_name'):
+async def create_channel(ctx, channel_name = commands.parameter(default = 'default_channel_name', description='name of new channel')):
     guild = ctx.guild
     existing_channel = discord.utils.get(guild.channels, name=channel_name)
     if not existing_channel:
@@ -94,28 +95,24 @@ async def create_channel(ctx, channel_name='default_channel_name'):
 
 @bot.command(name='manga_add', help='search for a manga to add to your update list')
 async def search_for_manga(ctx, *args):
-    currUser = ctx.author.name
-    print(f'person who used this command is: {currUser}')
-    print(f'ok, currently searching for: {" ".join(args)}')
     search_results = {}
     searched = False
     if len(args) < 1:
         await ctx.send(f'Please give a manga to search for after the command')
     else:
-        await ctx.send(f'{ctx.message.author.mention} i will search for {" ".join(args)} momentarily, please sit tight :D')
+        await ctx.send(f'{ctx.message.author.mention} i will search for {" ".join(args)} momentarily, please sit tight 😇')
         search_results = mangaSearch.m_search(" ".join(args))
         searched = True
     
     manga_list = []
     list_line = []
-    for num, nameLink in search_results.items():
-        list_line.append(f'{num}. {nameLink[0]}')
+    for num, name_link in search_results.items():
+        list_line.append(f'{num}. {name_link[0]}')
         if num % 10 == 0:
             manga_list.append(list_line)
             list_line = []
     if list_line:
         manga_list.append(list_line)#appends any remaining lines left
-    print(f'length of manga list: {len(manga_list)}')
     pages = len(manga_list)
     if pages > 0:
         curr_page = 1
@@ -148,44 +145,42 @@ async def search_for_manga(ctx, *args):
 
                 elif str(reaction.emoji) == "✅":
                     msg = await bot.wait_for("message", timeout=60, check=check_msg)
-                    mangaNum = int(msg.content)
-                    if mangaNum in search_results:
+                    manga_num = int(msg.content)
+                    if manga_num in search_results:
                         #sqlite stuff here, adding manga into database
                         user_id = ctx.author.id
-                        manga_name = search_results[mangaNum][0]
-                        manga_link = search_results[mangaNum][1]
+                        manga_name = search_results[manga_num][0]
+                        manga_link = search_results[manga_num][1]
                         #see if row already exists in table
                         c.execute("SELECT count(*) FROM manga_list WHERE (user_id=? AND manga_name=?)", (user_id, manga_name,))
-                        rowsBefore = c.fetchone()[0]
-                        if rowsBefore == 0:
+                        rows_before = c.fetchone()[0]
+                        if rows_before == 0:
                             insert_values = (user_id, manga_name, manga_link)
                             c.execute(manga_list_insert, insert_values)
                             connection.commit()
                             #updating latest_chapters table
                             c.execute("SELECT count(*) FROM latest_chapters WHERE manga_name=?", (manga_name,))
-                            rowsBefore = c.fetchone()[0]
-                            if rowsBefore == 0:#if not already in latest_chapters
+                            rows_before = c.fetchone()[0]
+                            if rows_before == 0:#if not already in latest_chapters
                                 latest_link = mangaUpdates.get_latest_chapter(manga_link)
                                 insert_values = (manga_name, manga_link, latest_link)
                                 c.execute(latest_chapters_insert, insert_values)
                                 connection.commit()
-                            await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was added to your list')
+                            await ctx.send(f'Manga #{msg.content}: {search_results[manga_num][0]}, was added to your list')
                             break
                         else:
-                            await ctx.send(f'Manga #{msg.content}: {search_results[mangaNum][0]}, was already in your list')
+                            await ctx.send(f'Manga #{msg.content}: {search_results[manga_num][0]}, was already in your list')
                             await message.remove_reaction(reaction, user)
                             continue
                     else:
-                        await ctx.send(f'{mangaNum} is not on the list, please enter a valid number')
+                        await ctx.send(f'{manga_num} is not on the list, please enter a valid number')
                         await message.remove_reaction(reaction, user)
                         continue
                 else:
                     await message.remove_reaction(reaction, user)
-                    # removes reactions if the user tries to go forward on the last page or
-                    # backwards on the first page
+                    # removes reactions if the user tries to go forward on the last page or backwards on the first page
             except asyncio.TimeoutError:
-                break
-                # ending the loop if user doesn't react after 60 seconds
+                break # ending the loop if user doesn't react after 60 seconds
     elif searched == True:
         await ctx.send(f'No search results found for {" ".join(args)}')
 
@@ -225,37 +220,30 @@ async def remove_manga(ctx):
 
                 elif str(reaction.emoji) == "✅":
                     msg = await bot.wait_for("message", timeout=60, check=check_msg)
-                    mangaNum = int(msg.content)
-                    print(f'mangaNum is {mangaNum}')
-                    lastNum = (len(manga_list) - 1)*10 + len(manga_list[-1])
-                    print(f'lastNum is: {lastNum}')
-                    if mangaNum > 0 and mangaNum <= lastNum:
-                        dirty_manga_name = manga_list[(mangaNum - 1) // 10][(mangaNum - 1) % 10]
+                    manga_num = int(msg.content)
+                    last_num = (len(manga_list) - 1)*10 + len(manga_list[-1])
+                    if manga_num > 0 and manga_num <= last_num:
+                        dirty_manga_name = manga_list[(manga_num - 1) // 10][(manga_num - 1) % 10]
                         manga_name = dirty_manga_name.lstrip('0123456789. ')
-                        print(f'manga_name found: {manga_name}')
                         c.execute("DELETE FROM manga_list WHERE (user_id=? AND manga_name=?)", (user_id, manga_name,))
                         connection.commit()
                         #remove manga from latest_chapters if not in manga_list anymore
                         c.execute("SELECT count(*) FROM manga_list WHERE manga_name=?", (manga_name,))
-                        rowsBefore = c.fetchone()[0]
-                        print(f'rowsBefore is: {rowsBefore}')
-                        if rowsBefore == 0:
+                        rows_before = c.fetchone()[0]
+                        if rows_before == 0:
                             c.execute("DELETE FROM latest_chapters WHERE manga_name=?", (manga_name,))
                             connection.commit()
                         await ctx.send(f'{manga_name} was successfully removed from your list')
                         break
                     else:
-                        print('invalid manga')
-                        await ctx.send(f'{mangaNum} is not on the list, please enter a valid number')
+                        await ctx.send(f'{manga_num} is not on the list, please enter a valid number')
                         await message.remove_reaction(reaction, user)
                         continue
                 else:
                     await message.remove_reaction(reaction, user)
-                    # removes reactions if the user tries to go forward on the last page or
-                    # backwards on the first page
+                    # removes reactions if the user tries to go forward on the last page or backwards on the first page
             except asyncio.TimeoutError:
-                break
-                # ending the loop if user doesn't react after 60 seconds
+                break # ending the loop if user doesn't react after 60 seconds
     else:
         await ctx.send(f'Your manga list is currently empty, use *!manga_add* to add to your list')
 
@@ -291,56 +279,39 @@ async def view_manga(ctx):
 
                 else:
                     await message.remove_reaction(reaction, user)
-                    # removes reactions if the user tries to go forward on the last page or
-                    # backwards on the first page
+                    # removes reactions if the user tries to go forward on the last page or backwards on the first page
             except asyncio.TimeoutError:
-                break
-                # ending the loop if user doesn't react after 60 seconds
+                break # ending the loop if user doesn't react after 60 seconds
     else:
         await ctx.send(f'Your manga update list is currently empty, try !manga_add *manga_name* to add a manga to your list!')
 
 @tasks.loop(hours=1)
 async def check_for_updates():
-    channel = bot.get_channel(1134171037228081275)
-    await bot.wait_until_ready()
-    t = time.localtime()
-    await channel.send(f'The current time is: {time.strftime("%H:%M:%S", t)}')
-    #get all rows from manga_list table
-    #create a dict {manga_link : [users]}
-    usersToMessage = defaultdict(list)
+    users_to_message = defaultdict(list)
     c.execute("SELECT manga_link, user_id FROM manga_list")
     user_list = c.fetchall()
     for manga_link, user_id in user_list:
-        usersToMessage[manga_link].append(user_id)
-    for link, users in usersToMessage.items():
-        print(f'link: {link}, users: {users}')
-    #get all rows from latest_chapters
-    #create 2nd dict {manga_link : [manga_name, latest_chapter]}
-    #for manga_name, manga_link, latest_chapter in rows:
-        #get updated latest_chapter from each manga_link
-        #if != to current latest_chapter, replace in latest_chapters table and add manga_link to a new list called "updatedManga"
-    mangaChecker = defaultdict(list)
+        users_to_message[manga_link].append(user_id)
+
+    manga_checker = defaultdict(list)
     c.execute("SELECT * FROM latest_chapters")
     lc_rows = c.fetchall()
     for manga_name, manga_link, latest_chapter in lc_rows:
-        mangaChecker[manga_link] = [manga_name, latest_chapter]
-    updatedManga = []
-    for manga_link, pair in mangaChecker.items():
-        oldChapter = pair[1]
-        newChapter = mangaUpdates.get_latest_chapter(manga_link)
-        if oldChapter != newChapter:
-            mangaChecker[manga_link][1] = newChapter
-            updatedManga.append(manga_link)
-            c.execute("UPDATE latest_chapters SET latest_chapter=? WHERE manga_name=?", (newChapter, pair[0],))
+        manga_checker[manga_link] = [manga_name, latest_chapter]
+    updated_manga = []
+    for manga_link, pair in manga_checker.items():
+        old_chapter = pair[1]
+        new_chapter = mangaUpdates.get_latest_chapter(manga_link)
+        if old_chapter != new_chapter:
+            manga_checker[manga_link][1] = new_chapter
+            updated_manga.append(manga_link)
+            c.execute("UPDATE latest_chapters SET latest_chapter=? WHERE manga_name=?", (new_chapter, pair[0],))
             connection.commit()
-    #for manga in updatedManga, get from 1st dict: users for that manga, and dm them all that there is a new chapter available, with the name and link
-        #we can get name and link by accessing the 2nd dict, where key = manga_link and values = name and latest link
-    print('New chapters found for:')
-    for manga in updatedManga:
-        print(f'Users to update for {manga}: {usersToMessage[manga]}')
-        manga_name = mangaChecker[manga][0]
-        new_link = mangaChecker[manga][1]
-        for user_id in usersToMessage[manga]:
+
+    for manga in updated_manga:
+        manga_name = manga_checker[manga][0]
+        new_link = manga_checker[manga][1]
+        for user_id in users_to_message[manga]:
             user = bot.get_user(int(user_id))
             await user.create_dm()
             await user.dm_channel.send(f'There is a new chapter available for {manga_name}! Read here: {new_link}')
